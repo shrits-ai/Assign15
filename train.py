@@ -124,57 +124,6 @@ class MPSCallback(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs):
         torch.mps.empty_cache()
 
-# Add this new callback class
-class TextGenerationCallback(TrainerCallback):
-    def __init__(self, tokenizer, config, prompts=None, generation_length=100, temperature=0.7 ):
-        self.tokenizer = tokenizer
-        self.config = config
-        self.prompts = prompts if prompts is not None else [
-            "The future of AI is",
-            "In a world where technology evolves rapidly,",
-            "Humans and machines have always coexisted, but now,",
-            "AI is becoming more powerful, and",
-            "What we know about the universe might change once"
-        ]
-        self.generation_length = generation_length
-        self.temperature = temperature
-        
-    def on_train_end(self, args, state, control, **kwargs):
-        # After training ends, generate 5 pieces of text with 5 different prompts
-        model = kwargs['model']
-        
-        # Generate for each prompt
-        model.eval()
-        with torch.no_grad():
-            for i, prompt in enumerate(self.prompts):
-                inputs = self.tokenizer(
-                    prompt, 
-                    return_tensors="pt",
-                    padding=False,  # Explicitly disable padding
-                    return_attention_mask=False
-                ).to(device)
-                
-                outputs = model.generate(
-                    input_ids=inputs.input_ids,
-                    max_new_tokens=self.generation_length,
-                    temperature=self.temperature,
-                    top_p=0.9,
-                    eos_token_id=None,  # Disable EOS early stopping
-                    pad_token_id=self.config.pad_token_id
-                )
-                
-                # Decode and log the generated text
-                generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                
-                print(f"\nGenerated text {i + 1} for prompt: '{prompt}'")
-                print("-" * 50)
-                print(generated_text)
-                print("-" * 50)
-                
-                # Log each generated text to wandb
-                wandb.log({"generated_text": wandb.Html(f"<pre>{generated_text}</pre>")}, 
-                            step=state.global_step)
-
 # the Trainer initialization
 trainer = Trainer(
     model=model,
@@ -185,19 +134,6 @@ trainer = Trainer(
     tokenizer=tokenizer,
     callbacks=[
         MPSCallback(),
-        TextGenerationCallback(
-            tokenizer,
-            config=config,  # Pass the config here
-            prompts=[
-                "The future of AI is",
-                "In a world where technology evolves rapidly,",
-                "Humans and machines have always coexisted, but now,",
-                "AI is becoming more powerful, and",
-                "What we know about the universe might change once"
-            ],
-            generation_length=100,
-            temperature=0.3  # Reduce randomness
-        ),
         CustomLoggingCallback(),  # Add custom logging callback
     ]
 )
