@@ -12,6 +12,7 @@ from transformers import (
 from datasets import load_dataset
 import wandb
 from model import CustomConfig, CustomLLM
+from transformers import TrainerCallback
 
 # Configuration - Match exactly with your model specs
 CHECKPOINT_DIR = "./checkpoints"
@@ -108,6 +109,12 @@ training_args = TrainingArguments(
     report_to="wandb",
     save_total_limit=3,  # Keep latest 3 checkpoints
 )
+class CustomLoggingCallback(TrainerCallback):
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        # This will add the step number to the logs.
+        if logs is not None:
+            logs['step'] = state.global_step
+            print(f"Step {state.global_step}: {logs}")  # Print it to console for tracking
 
 # Custom callback for MPS-specific handling
 class MPSCallback(TrainerCallback):
@@ -188,6 +195,7 @@ trainer = Trainer(
             generation_length=100,
             temperature=0.3  # Reduce randomness
         ),
+        CustomLoggingCallback(),  # Add custom logging callback
     ]
 )
 
