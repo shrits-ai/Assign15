@@ -114,7 +114,10 @@ class CustomLoggingCallback(TrainerCallback):
         # This will add the step number to the logs.
         if logs is not None:
             logs['step'] = state.global_step
-            print(f"Step {state.global_step}: {logs}")  # Print it to console for tracking
+            #print(f"Step {state.global_step}: {logs}")  # Print it to console for tracking
+
+        # Log the information to WandB if you're using it
+        wandb.log(logs, step=state.global_step)
 
 # Custom callback for MPS-specific handling
 class MPSCallback(TrainerCallback):
