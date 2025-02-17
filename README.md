@@ -14,7 +14,7 @@ The model consists of a custom Transformer architecture with enhanced attention 
 - **Dropout**: `Dropout(p=0.1, inplace=False)`
 
 ### Decoder Layers
-- **Total Decoder Layers**: 30
+- **Total Decoder Layers**: 24
   - Each layer consists of the following components:
     - **Self-Attention**: 
       - MultiHeadLatentAttention with multiple projection layers and rotary embeddings for better positional encoding.
