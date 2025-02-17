@@ -8,37 +8,102 @@ The model consists of a custom Transformer architecture with enhanced attention 
 
 ## Architecture Breakdown
 
-### Embedding Layers
-- **Token Embeddings**: `Embedding(49152, 768)`
-- **Position Embeddings**: `Embedding(2048, 768)`
-- **Dropout**: `Dropout(p=0.1, inplace=False)`
+🔹 Custom Configuration (CustomConfig)
 
-### Decoder Layers
-- **Total Decoder Layers**: 24
-  - Each layer consists of the following components:
-    - **Self-Attention**: 
-      - MultiHeadLatentAttention with multiple projection layers and rotary embeddings for better positional encoding.
-      - Key and Value projections (`kv_proj_d`, `k_proj_u`, `v_proj_u`) for latent space compression.
-      - Query projections (`q_proj_d`, `q_proj_u`) for dynamic queries with rotary embeddings (`rope_k`, `rope_q`).
-    - **MLP (Mixture of Experts)**:
-      - Uses **DeepSeekMoE** with multiple expert layers (`DeepSeekExpertLayer`).
-      - **Router Layer**: A linear layer that determines which experts to route based on input.
-      - Each **DeepSeekExpertLayer** contains:
-        - **Gate Projection**: `Linear(in_features=768, out_features=1536, bias=False)`
-        - **Up Projection**: `Linear(in_features=768, out_features=1536, bias=False)`
-        - **Down Projection**: `Linear(in_features=1536, out_features=768, bias=False)`
-        - **Activation Function**: `SiLU()`
-    - **Normalization**:
-      - **Input Normalization**: `CustomRMSNorm`
-      - **Post-Attention Normalization**: `CustomRMSNorm`
+The CustomConfig class defines all hyperparameters of the model.
 
-### Output Layer
-- **LM Head**: `Linear(in_features=768, out_features=49152, bias=True)` for generating the output logits.
+Parameter          Value    Description
 
-## Key Features
-- **Efficient Attention**: Uses MultiHeadLatentAttention with rotary embeddings for improved efficiency.
-- **Mixture of Experts (MoE)**: Scalable with the ability to route input through multiple experts for more powerful processing.
-- **Residual Connections and Layer Norm**: Each layer is equipped with residual connections and custom RMS normalization for stable training.
+vocab_size        49152  Vocabulary size
+
+hidden_size        1024  Transformer hidden dimension
+
+num_hidden_layers  24  Number of decoder layers
+
+num_attention_heads 16  Attention heads for self-attention
+
+num_experts         8  Number of MoE experts
+
+top_k_experts       2  Number of experts chosen per forward pass
+
+compression_ratio  4   Used in Multi-Head Latent Attention
+
+🔹 Rotary Embeddings (RotaryEmbedding)
+
+This model uses Rotary Positional Embeddings (RoPE) instead of absolute position embeddings.
+
+✅ Benefits of RoPE:
+
+Improves long-range dependencies
+
+Works better in autoregressive tasks
+
+Provides continuous positional encoding
+
+How RoPE Works?
+
+Computes sine and cosine positional encodings
+
+Applies element-wise multiplications to query & key embeddings
+
+Encodes relative positional information instead of absolute positions
+
+🔹 Multi-Head Latent Attention (MultiHeadLatentAttention)
+
+This is a custom attention mechanism designed for efficiency.
+
+✅ How is it different from standard attention?
+
+Latent compression: Instead of processing full attention keys/values, we compress the input using compression_ratio.
+
+Decomposed projections:
+
+First, project into latent space
+
+Then, project back to original dimensions
+
+Uses RoPE embeddings to enhance positional information
+
+💡 Why is this useful?
+
+Reduces memory and computation costs
+
+Enables faster attention computation
+
+Helps in scaling large models efficiently
+
+🔹 Mixture of Experts (MoE) (LlamaMLP)
+
+Instead of using a single MLP, the model uses multiple expert layers (MoE).
+
+✅ How MoE Works?
+
+Router Network selects the best top_k_experts for each token
+
+The token is processed only by selected experts, saving compute
+
+Final output is a weighted sum of expert outputs
+
+💡 Why Use MoE?
+
+Each expert learns specialized features
+
+Improves model efficiency (not all experts are active per token)
+
+Helps in scaling to large datasets
+
+🔹 Transformer Decoder Layers (DecoderLayer)
+
+Each Transformer Decoder Block has:✅ Multi-Head Latent Attention (MLHA)✅ Feed-forward MLP (Mixture of Experts)✅ Layer Normalization (CustomRMSNorm)✅ Dropout layers to prevent overfitting
+
+📌 Notable Modifications in the Decoder:
+
+Uses MoE instead of a standard MLP
+
+Includes gradient scaling for better stability
+
+Dropout added to both attention & MLP outputs
+
 
 # Model Training
 
