@@ -93,13 +93,13 @@ Improves model efficiency (not all experts are active per token)
 Helps in scaling to large datasets
 ```
 🔹 Transformer Decoder Layers (DecoderLayer)
-
+```
 Each Transformer Decoder Block has:
 ✅ Multi-Head Latent Attention (MLHA)
 ✅ Feed-forward MLP (Mixture of Experts)
 ✅ Layer Normalization (CustomRMSNorm)
 ✅ Dropout layers to prevent overfitting
-
+```
 
 # Model Training
 
