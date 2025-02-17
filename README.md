@@ -9,7 +9,7 @@ The model consists of a custom Transformer architecture with enhanced attention 
 ## Architecture Breakdown
 
 🔹 Custom Configuration (CustomConfig)
-
+```
 The CustomConfig class defines all hyperparameters of the model.
 
 Parameter          Value    Description
@@ -27,9 +27,9 @@ num_experts         8  Number of MoE experts
 top_k_experts       2  Number of experts chosen per forward pass
 
 compression_ratio  4   Used in Multi-Head Latent Attention
-
+```
 🔹 Rotary Embeddings (RotaryEmbedding)
-
+```
 This model uses Rotary Positional Embeddings (RoPE) instead of absolute position embeddings.
 
 ✅ Benefits of RoPE:
@@ -47,9 +47,9 @@ Computes sine and cosine positional encodings
 Applies element-wise multiplications to query & key embeddings
 
 Encodes relative positional information instead of absolute positions
-
+```
 🔹 Multi-Head Latent Attention (MultiHeadLatentAttention)
-
+```
 This is a custom attention mechanism designed for efficiency.
 
 ✅ How is it different from standard attention?
@@ -71,9 +71,9 @@ Reduces memory and computation costs
 Enables faster attention computation
 
 Helps in scaling large models efficiently
-
+```
 🔹 Mixture of Experts (MoE) (LlamaMLP)
-
+```
 Instead of using a single MLP, the model uses multiple expert layers (MoE).
 
 ✅ How MoE Works?
@@ -91,18 +91,14 @@ Each expert learns specialized features
 Improves model efficiency (not all experts are active per token)
 
 Helps in scaling to large datasets
-
+```
 🔹 Transformer Decoder Layers (DecoderLayer)
 
-Each Transformer Decoder Block has:✅ Multi-Head Latent Attention (MLHA)✅ Feed-forward MLP (Mixture of Experts)✅ Layer Normalization (CustomRMSNorm)✅ Dropout layers to prevent overfitting
-
-📌 Notable Modifications in the Decoder:
-
-Uses MoE instead of a standard MLP
-
-Includes gradient scaling for better stability
-
-Dropout added to both attention & MLP outputs
+Each Transformer Decoder Block has:
+✅ Multi-Head Latent Attention (MLHA)
+✅ Feed-forward MLP (Mixture of Experts)
+✅ Layer Normalization (CustomRMSNorm)
+✅ Dropout layers to prevent overfitting
 
 
 # Model Training
