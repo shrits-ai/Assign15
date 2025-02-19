@@ -66,40 +66,40 @@ The model is trained using the `Trainer` API from Hugging Face:
 ### Example Output
 ```
 CustomLLM(
-  (token_embeddings): Embedding(49152, 1024)
-  (position_embeddings): Embedding(2048, 1024)
+  (token_embeddings): Embedding(49152, 768)
+  (position_embeddings): Embedding(2048, 768)
   (dropout): Dropout(p=0.1, inplace=False)
   (decoder_layers): ModuleList(
     (0-29): 30 x DecoderLayer(
       (self_attn): MultiHeadLatentAttention(
-        (kv_proj_d): Linear(in_features=1024, out_features=256, bias=False)
-        (q_proj_d): Linear(in_features=1024, out_features=256, bias=False)
-        (k_proj_u): Linear(in_features=256, out_features=512, bias=False)
-        (v_proj_u): Linear(in_features=256, out_features=1024, bias=False)
-        (q_proj_u): Linear(in_features=256, out_features=512, bias=False)
-        (rope_k): Linear(in_features=1024, out_features=512, bias=False)
-        (rope_q): Linear(in_features=256, out_features=512, bias=False)
-        (o_proj): Linear(in_features=1024, out_features=1024, bias=False)
+        (kv_proj_d): Linear(in_features=768, out_features=192, bias=False)
+        (q_proj_d): Linear(in_features=768, out_features=192, bias=False)
+        (k_proj_u): Linear(in_features=192, out_features=384, bias=False)
+        (v_proj_u): Linear(in_features=192, out_features=768, bias=False)
+        (q_proj_u): Linear(in_features=192, out_features=384, bias=False)
+        (rope_k): Linear(in_features=768, out_features=384, bias=False)
+        (rope_q): Linear(in_features=192, out_features=384, bias=False)
+        (o_proj): Linear(in_features=768, out_features=768, bias=False)
         (rotary_emb): RotaryEmbedding()
       )
       (mlp): LlamaMLP(
         (shared_experts): ModuleList(
           (0): DeepSeekExpertLayer(
-            (gate_proj): Linear(in_features=1024, out_features=786, bias=False)
-            (up_proj): Linear(in_features=1024, out_features=786, bias=False)
-            (down_proj): Linear(in_features=786, out_features=1024, bias=False)
+            (gate_proj): Linear(in_features=768, out_features=1536, bias=False)
+            (up_proj): Linear(in_features=768, out_features=1536, bias=False)
+            (down_proj): Linear(in_features=1536, out_features=768, bias=False)
             (act_fn): SiLU()
           )
         )
         (routed_experts): ModuleList(
           (0-6): 7 x DeepSeekExpertLayer(
-            (gate_proj): Linear(in_features=1024, out_features=786, bias=False)
-            (up_proj): Linear(in_features=1024, out_features=786, bias=False)
-            (down_proj): Linear(in_features=786, out_features=1024, bias=False)
+            (gate_proj): Linear(in_features=768, out_features=1536, bias=False)
+            (up_proj): Linear(in_features=768, out_features=1536, bias=False)
+            (down_proj): Linear(in_features=1536, out_features=768, bias=False)
             (act_fn): SiLU()
           )
         )
-        (router): Linear(in_features=1024, out_features=7, bias=False)
+        (router): Linear(in_features=768, out_features=7, bias=False)
       )
       (input_norm): CustomRMSNorm()
       (post_attn_norm): CustomRMSNorm()
@@ -107,9 +107,9 @@ CustomLLM(
       (mlp_dropout): Dropout(p=0.3, inplace=False)
     )
   )
-  (lm_head): Linear(in_features=1024, out_features=49152, bias=True)
+  (lm_head): Linear(in_features=768, out_features=49152, bias=True)
 )
-Model parameters: 765.16M
+Model parameters: 973.12M
 ```
 ### Training Log 
 
