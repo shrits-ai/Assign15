@@ -12,144 +12,137 @@ from transformers import (
 from datasets import load_dataset
 import wandb
 from model import CustomConfig, CustomLLM
-from transformers import TrainerCallback
 
 # Configuration - Match exactly with your model specs
 CHECKPOINT_DIR = "./checkpoints"
-SEQ_LENGTH = 256  # Reduced from 2048 due to memory constraints
-BATCH_SIZE = 4    # Adjust based on available memory
-GRAD_ACCUM_STEPS = 8  # Effective batch size = BATCH_SIZE * GRAD_ACCUM_STEPS
+SEQ_LENGTH = 512
+BATCH_SIZE = 4
+GRAD_ACCUM_STEPS = 8
 
 # Initialize accelerator
 accelerator = Accelerator(
-    mixed_precision="no",  # MPS doesn't support FP16
+    mixed_precision="no",
     gradient_accumulation_steps=GRAD_ACCUM_STEPS
 )
 
 # Load tokenizer
 tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/cosmo2-tokenizer")
-tokenizer.pad_token = tokenizer.eos_token  # For padding
+tokenizer.pad_token = tokenizer.eos_token
 
-# Model configuration (from your specs)
+# Model configuration with MoE fixes
 config = CustomConfig()
-# Align config with tokenizer's special tokens
 config.eos_token_id = tokenizer.eos_token_id
 config.pad_token_id = tokenizer.pad_token_id
 config.bos_token_id = tokenizer.bos_token_id
+config.moe_train_capacity_factor = 2.0  # Critical MoE fix
+config.moe_eval_capacity_factor = 2.0   # Prevent expert overflow
 
-
-# Initialize model
+# Initialize model with MPS optimizations
 model = CustomLLM(config)
-device = (
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
-    )
-total_params = sum(p.numel() for p in model.parameters())
-print(f"Model parameters: {total_params/1e6:.2f}M")
 print(model)
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+print(f"Model parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
 model.to(device)
-# Dataset setup (streaming)
+
+# MPS-specific initializations
+if device == "mps":
+    torch.mps.set_per_process_memory_fraction(0.90)
+    # Force float32 for stability
+    for p in model.parameters():
+        p.data = p.data.to(torch.float32)
+
+# Dataset setup with proper streaming
 class StreamDataset(IterableDataset):
     def __init__(self, split=None, dataset=None):
-        if dataset is not None:
-            self.dataset = dataset
-        else:
-            # Load dataset with correct configuration
-            self.dataset = load_dataset(
-                "HuggingFaceTB/smollm-corpus",
-                name="cosmopedia-v2",  # Explicitly specify dataset name
-                split=split,
-                streaming=True
-            ).map(
-                tokenize_fn,
-                batched=True
-            )
+        self.dataset = dataset if dataset else load_dataset(
+            "HuggingFaceTB/smollm-corpus",
+            name="cosmopedia-v2",
+            split=split,
+            streaming=True
+        ).shuffle(seed=42, buffer_size=10000).map(
+            self.tokenize_fn,
+            batched=True
+        )
+    
+    def tokenize_fn(self, examples):
+        return tokenizer(
+            examples["text"],
+            max_length=SEQ_LENGTH,
+            truncation=True,
+            padding=False,  # Dynamic padding
+            return_attention_mask=True
+        )
     
     def __iter__(self):
         for sample in self.dataset:
-            yield sample  # Now yields tokenized data
+            yield sample
 
     def take(self, n):
         return StreamDataset(dataset=self.dataset.take(n))
 
-
-# Tokenization function
-def tokenize_fn(examples):
-    return tokenizer(
-        examples["text"],
-        max_length=SEQ_LENGTH,
-        truncation=True,
-        padding="max_length"
-    )
-
-# Data collator (handles padding and attention masks)
+# Data collator with MPS fixes
 data_collator = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
-    mlm=False  # Causal language modeling
+    mlm=False,
+    pad_to_multiple_of=64,
+    return_tensors="pt"  # Critical for MPS
 )
 
-# Training arguments
+# Training arguments with stabilization
 training_args = TrainingArguments(
     output_dir=CHECKPOINT_DIR,
     per_device_train_batch_size=BATCH_SIZE,
     max_steps=10000,
     logging_steps=100,
-    save_steps=1000,  # Increased from 500 for stability
-    evaluation_strategy="steps",
-    eval_steps=1000,  # Evaluate more frequently
-    learning_rate=2e-5,
-    lr_scheduler_type="cosine",  # smoother decay
-    warmup_steps=2000,  # Extended warmup
-    weight_decay=0.01,
+    save_steps=500,
+    evaluation_strategy="no",
+    learning_rate=3e-6,  # Adjusted learning rate
+    lr_scheduler_type="cosine",  # Changed to cosine decay
+    warmup_steps=1000,
+    weight_decay=0.15,
+    optim="adamw_torch_fused",
     gradient_accumulation_steps=GRAD_ACCUM_STEPS,
-    max_grad_norm=1.0,  # Prevent exploding gradients
+    max_grad_norm=1.0,  # Tighter gradient clipping
     fp16=False,
     remove_unused_columns=True,
     report_to="wandb",
-    save_total_limit=3,  # Keep latest 3 checkpoints
+    save_total_limit=3,
+    use_mps_device=True,
+    dataloader_num_workers=0,
+    dataloader_pin_memory=False
 )
-class CustomLoggingCallback(TrainerCallback):
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        # This will add the step number to the logs.
-        if logs is not None:
-            logs['step'] = state.global_step
-            #print(f"Step {state.global_step}: {logs}")  # Print it to console for tracking
 
-        # Log the information to WandB if you're using it
-        wandb.log(logs, step=state.global_step)
-
-# Custom callback for MPS-specific handling
-class MPSCallback(TrainerCallback):
+# Debugging callback
+class TrainingDebugCallback(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs):
+        # Log smooth loss
+        wandb.log({ "steps":state.global_step,
+            "loss_ema": trainer.model.loss_ema.item(),
+                })
+
+        # Empty MPS cache regularly
         torch.mps.empty_cache()
 
-# the Trainer initialization
+# Initialize trainer with diagnostics
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=StreamDataset("train"),
-    eval_dataset=StreamDataset("train").take(100),
     data_collator=data_collator,
     tokenizer=tokenizer,
     callbacks=[
-        MPSCallback(),
-        CustomLoggingCallback(),  # Add custom logging callback
+        TrainingDebugCallback(),
     ]
 )
 
-# Check if checkpoint exists
-checkpoint_path = f"{CHECKPOINT_DIR}/checkpoint-10000"
+# Checkpoint handling
+checkpoint_path = f"{CHECKPOINT_DIR}/checkpoint-5000"
 if os.path.exists(checkpoint_path):
-    print(f"Found checkpoint at {checkpoint_path}, resuming training... logging interval changed to 10")
-    # Temporarily set max_steps to 50 for the resumed training
-    trainer.args.max_steps = 10000
-    trainer.args.logging_steps=100
+    print(f"Resuming from {checkpoint_path}")
     trainer.train(resume_from_checkpoint=checkpoint_path)
-    trainer.save_model(f"{CHECKPOINT_DIR}/final")
 else:
-    print(f"No checkpoint found, starting training from scratch...")
+    print("Starting fresh training")
     trainer.train()
-    trainer.save_model(f"{CHECKPOINT_DIR}/final_10000")
 
+trainer.save_model(f"{CHECKPOINT_DIR}/final")
 accelerator.print("Training complete!")

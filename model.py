@@ -11,12 +11,12 @@ class CustomConfig:
         self.hidden_size = 768          # d_model
         self.intermediate_size = 1536   # FFN dimension
         self.num_hidden_layers = 30     # Number of decoder layers
-        self.num_attention_heads = 12    # Query heads
-        self.num_key_value_heads = 3    # Key/Value heads
+        self.num_attention_heads = 9    # Query heads
+        self.num_key_value_heads = 3   # Key/Value heads
         self.max_position_embeddings = 2048
         self.rms_norm_eps = 1e-5
         self.rope_theta = 10000.0       # Rotary embedding base
-        self.compression_ratio = 8      # Compression ratio for MLHA
+        self.compression_ratio = 4      # Compression ratio for MLHA
         self.num_experts = 8           # Number of experts in MoE
         self.num_shared_experts = 1    # Number of shared experts
         self.top_k_experts = 2         # Top-k experts in MoE
@@ -79,7 +79,11 @@ class MultiHeadLatentAttention(nn.Module):
         self.k_proj_u = nn.Linear(self.latent_dim, self.hidden_size//2, bias=False)
         self.v_proj_u = nn.Linear(self.latent_dim, self.hidden_size, bias=False)
         self.q_proj_u = nn.Linear(self.latent_dim, self.hidden_size//2, bias=False)
-
+        # Add initialization for all linear layers
+        for lin in [self.kv_proj_d, self.q_proj_d, self.k_proj_u, self.v_proj_u, self.q_proj_u]:
+            nn.init.normal_(lin.weight, mean=0.0, std=0.02)  # Smaller initialization
+            if lin.bias is not None:
+                nn.init.zeros_(lin.bias)
         # ROPE Components
         self.rope_k = nn.Linear(self.hidden_size, self.hidden_size//2, bias=False)
         self.rope_q = nn.Linear(self.latent_dim, self.hidden_size//2, bias=False)
@@ -89,8 +93,8 @@ class MultiHeadLatentAttention(nn.Module):
 
         # Rotary Embeddings (Using existing RotaryEmbedding)
         self.rotary_emb = RotaryEmbedding(
-            dim=self.head_dim // 2,
-            max_seq_len=config.max_position_embeddings,
+            dim=self.head_dim,
+            max_seq_len=int(1024 * 1.25),
             theta=config.rope_theta
         )
 
@@ -133,7 +137,7 @@ class MultiHeadLatentAttention(nn.Module):
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             q, k, v,
             attn_mask=attention_mask,
-            dropout_p=0.0,
+            dropout_p=0.1,
             is_causal=False  # Mask already includes causal
         )
 
@@ -153,31 +157,6 @@ def rotate_half(x):
 # 5. MLP Layer (Remains Unchanged)
 # Custom MLP Layer with MoE
 class LlamaMLP(nn.Module):
-    def __init__(self, hidden_size, intermediate_size, num_experts, num_shared_experts, top_k):
-        super().__init__()
-        self.moe = DeepSeekMoE(
-            hidden_size=hidden_size,
-            intermediate_size=intermediate_size,
-            num_experts=num_experts,
-            num_shared_experts=num_shared_experts,
-            top_k=top_k
-        )
-    
-    def forward(self, x):
-        return self.moe(x)
-
-class DeepSeekExpertLayer(nn.Module):
-    def __init__(self, hidden_size, intermediate_size):
-        super().__init__()
-        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
-        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
-        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
-        self.act_fn = nn.SiLU()
-    
-    def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-
-class DeepSeekMoE(nn.Module):
     def __init__(self, hidden_size, intermediate_size, num_experts=8, num_shared_experts=1, top_k=2):
         super().__init__()
         self.num_experts = num_experts
@@ -210,10 +189,11 @@ class DeepSeekMoE(nn.Module):
 
         # Calculate routing scores
         routing_logits = self.router(x) + self.routing_bias
-        routing_probs = torch.sigmoid(routing_logits)
+        routing_probs = torch.softmax(routing_logits, dim=-1) 
 
         # Get top-k experts per token
-        scores, indices = torch.topk(routing_probs, self.top_k, dim=-1)
+        scores, indices = torch.topk(routing_probs, self.top_k)
+        #scores, indices = torch.topk(routing_probs, self.top_k, dim=-1)
         scores = scores / scores.sum(dim=-1, keepdim=True)  # Normalize scores
 
         # Process through selected experts
@@ -240,6 +220,18 @@ class DeepSeekMoE(nn.Module):
         load_diff = expert_load - target_load
         self.routing_bias.data -= 0.1 * load_diff
 
+class DeepSeekExpertLayer(nn.Module):
+    def __init__(self, hidden_size, intermediate_size):
+        super().__init__()
+        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+        self.act_fn = nn.SiLU()
+    
+    def forward(self, x):
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+
+
 # 6. Transformer Decoder Layer (Updated Attention)
 class DecoderLayer(nn.Module):
     def __init__(self, config):
@@ -248,24 +240,24 @@ class DecoderLayer(nn.Module):
         self.mlp = LlamaMLP(config.hidden_size, config.intermediate_size, config.num_experts, config.num_shared_experts, config.top_k_experts)
         self.input_norm = CustomRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attn_norm = CustomRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.attn_dropout = nn.Dropout(0.3)  # Added
+        self.mlp_dropout = nn.Dropout(0.3)   # Added
+        
 
     def forward(self, x, attention_mask=None, past_key_value=None, use_cache=False):
         # Self-attention with KV caching
         residual = x
         x = self.input_norm(x)
-        
         # Pass through modified self-attention with caching support
         attn_output = self.self_attn(x )
-        
         # Residual connection
-        x = residual + attn_output
+        x = residual + self.attn_dropout(attn_output)  # Apply dropout
 
-        # MoE MLP layer (unchanged)
+        # MLP
         residual = x
         x = self.post_attn_norm(x)
-        x = self.mlp(x)
-        x = residual + x
-
+        mlp_output = self.mlp(x)
+        x = residual + self.mlp_dropout(mlp_output)    # Apply dropout
         return x
 
 # 7. Full Model (Remains Unchanged except for attention type)
@@ -284,7 +276,10 @@ class CustomLLM(nn.Module):
 
         # 3. Final Output Layer (for generating logits)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
-
+         # Initialize EMA loss tracking
+        self.loss_ema = torch.tensor(11.0, dtype=torch.float32)  # Start with high loss
+        self.loss_scale = 1.0
+    
     def forward(self, input_ids, attention_mask=None, labels=None, past_key_values=None):
         # 1. Get token and position embeddings with KV cache support
         batch_size, seq_len = input_ids.shape
@@ -305,32 +300,33 @@ class CustomLLM(nn.Module):
         x = self.dropout(x)
 
         # 2. Prepare attention mask for causal+padding
+        device = input_ids.device
+        batch_size, seq_len = input_ids.shape
+        past_length = 0
+        if past_key_values is not None:
+            past_length = past_key_values[0][0].size(2)  # Adjust based on actual cache structure
+
+        # Always create causal mask
+        causal_mask = torch.ones(
+            (batch_size, seq_len, past_length + seq_len),
+            dtype=torch.bool,
+            device=device
+        )
+        causal_mask = causal_mask.triu(diagonal=1 + past_length)  # Block future tokens
+
+        # Handle padding mask from data collator
         if attention_mask is not None:
-            # Combine cached mask with new mask
-            if past_key_values is not None:
-                # For batch_size=1: [past_length] + [seq_len]
-                mask_cond = attention_mask.size(-1)
-                causal_mask = torch.ones(
-                    1, seq_len, past_length + seq_len, 
-                    dtype=torch.bool, device=input_ids.device
-                )
-                
-                # Create causal mask for new tokens only
-                causal_mask = causal_mask.triu(diagonal=1 + past_length)
-                mask = causal_mask | ~attention_mask[:, None, None, :].bool()
-                attention_mask = torch.where(mask, -float('inf'), 0).to(x.dtype)
-            else:
-                # Original mask processing
-                while attention_mask.dim() > 4:
-                    attention_mask = attention_mask.squeeze(0)
-                attention_mask = attention_mask[:, None, None, :]
+            # Convert padding mask to boolean (1 = keep, 0 = mask)
+            # Original attention_mask is 1 for non-pad, 0 for pad
+            padding_mask = attention_mask[:, None, None, :].bool()  # [bs, 1, 1, seq_len]
+            # Expand padding mask to full sequence length (past + current)
+            combined_mask = causal_mask | ~padding_mask.expand(-1, -1, past_length + seq_len, -1)
         else:
-            # Create causal mask if no mask provided
-            attention_mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=input_ids.device, dtype=torch.bool), 
-                diagonal=1
-            )
-            attention_mask = attention_mask.unsqueeze(0).unsqueeze(0) * -float('inf')
+            combined_mask = causal_mask
+
+        # Convert to attention bias
+        attention_bias = torch.where(combined_mask, -float('inf'), 0).to(x.dtype)
+        attention_bias = attention_bias[:, :, :, past_length:]  # Focus on current tokens
 
         # 4. Final output layer
         logits = self.lm_head(x)
@@ -340,9 +336,20 @@ class CustomLLM(nn.Module):
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=self.config.pad_token_id)
             loss = loss_fct(logits.view(-1, self.config.vocab_size), labels.view(-1))
+        # Smooth loss tracking with EMA
+        if not hasattr(self, "loss_ema"):  # Initialize loss_ema if not exists
+            self.loss_ema = torch.tensor(7.0, dtype=torch.float32, device=logits.device)
+
+        alpha = 0.99  # Smoothing factor (closer to 1 = smoother)
+        self.loss_ema = alpha * self.loss_ema + (1 - alpha) * loss.detach()
+
+        if self.loss_ema < 2.3:  # When loss is getting too low
+            self.loss_scale = max(0.3, self.loss_scale * 0.8)  # Reduce scale aggressively
+        else:
+            self.loss_scale = min(1.0, self.loss_scale * 1.05)  # Allow recovery if loss increases
 
         return CausalLMOutputWithPast(
-            loss=loss,
+            loss=loss * self.loss_scale if loss is not None else None,
             logits=logits,
         )
 
@@ -382,4 +389,3 @@ generated_text = tokenizer.decode(generated[0].tolist())
 print(prompt)
 print(generated_text)
 '''
-
