@@ -1,4 +1,3 @@
-# CustomLLM Model Architecture
 
 # CustomLLM
 
@@ -8,7 +7,7 @@
 ## Model Architecture
 
 ### Embeddings
-- **Token Embeddings**: Maps 49,152 vocabulary tokens to a 1,024-dimensional space.
+- **Token Embeddings**: Maps 49,152 vocabulary tokens to a 768-dimensional space.
 - **Position Embeddings**: Provides 2,048 position encodings to capture sequence order.
 - **Dropout**: A dropout layer (p=0.1) applied to prevent overfitting.
 
@@ -17,20 +16,20 @@ The model consists of **30 decoder layers**, each containing:
 
 #### 1. Self-Attention Mechanism
 - **Multi-Head Latent Attention**: Enhances feature extraction with multiple projections:
-  - `kv_proj_d`: Maps 1,024-dimensional inputs to 256 dimensions for key and value processing.
-  - `q_proj_d`: Projects queries to 256 dimensions.
-  - `k_proj_u`: Upscales key representations to 512 dimensions.
-  - `v_proj_u`: Expands values to 1,024 dimensions.
-  - `q_proj_u`: Upscales queries to 512 dimensions.
+  - `kv_proj_d`: Maps 768-dimensional inputs to 192 dimensions for key and value processing.
+  - `q_proj_d`: Projects queries to 192 dimensions.
+  - `k_proj_u`: Upscales key representations to 384 dimensions.
+  - `v_proj_u`: Expands values to 768 dimensions.
+  - `q_proj_u`: Upscales queries to 384 dimensions.
   - `rope_k`, `rope_q`: Rotary positional embeddings for improved positional encoding.
-  - `o_proj`: Outputs 1,024-dimensional features.
+  - `o_proj`: Outputs 768-dimensional features.
   
 #### 2. Feedforward Network (Mixture of Experts)
 - **LlamaMLP**: Implements a hybrid feedforward network with both shared and routed experts.
 - **Shared Experts**: A single `DeepSeekExpertLayer` with:
-  - `gate_proj`: Projects inputs to 786 dimensions.
-  - `up_proj`: Expands features to 786 dimensions.
-  - `down_proj`: Reduces back to 1,024 dimensions.
+  - `gate_proj`: Projects inputs to 1,536 dimensions.
+  - `up_proj`: Expands features to 1,536 dimensions.
+  - `down_proj`: Reduces back to 768 dimensions.
   - Activation Function: **SiLU (Sigmoid Linear Unit)**.
 - **Routed Experts**: 7 additional `DeepSeekExpertLayer` components.
 - **Router**: A linear layer that selects among the 7 experts.
@@ -41,10 +40,10 @@ The model consists of **30 decoder layers**, each containing:
 - **Dropout Layers**: Applied to attention (`p=0.3`) and MLP layers (`p=0.3`).
 
 ### Output Layer
-- **Language Model Head (`lm_head`)**: A linear layer mapping 1,024 hidden dimensions to 49,152 vocabulary tokens.
+- **Language Model Head (`lm_head`)**: A linear layer mapping 768 hidden dimensions to 49,152 vocabulary tokens.
 
 ## Model Size
-- **Total Parameters**: **765.16M**
+- **Total Parameters**: **973.12M**
 
 ### Model Initialization
 - **CustomLLM** model is initialized with the custom configuration.
