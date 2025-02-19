@@ -1,125 +1,50 @@
 # CustomLLM Model Architecture
 
-## Overview
-The model consists of a custom Transformer architecture with enhanced attention mechanisms and Mixture of Experts (MoE). Below is a breakdown of the main components.
-
-## Model Parameters
-- **Total Parameters**: 1075.06M
-
-## Architecture Breakdown
-
-🔹 Custom Configuration (CustomConfig)
-```
-The CustomConfig class defines all hyperparameters of the model.
-
-Parameter          Value    Description
-
-vocab_size        49152  Vocabulary size
-
-hidden_size        1024  Transformer hidden dimension
-
-num_hidden_layers  24  Number of decoder layers
-
-num_attention_heads 16  Attention heads for self-attention
-
-num_experts         8  Number of MoE experts
-
-top_k_experts       2  Number of experts chosen per forward pass
-
-compression_ratio  4   Used in Multi-Head Latent Attention
-```
-🔹 Rotary Embeddings (RotaryEmbedding)
-```
-This model uses Rotary Positional Embeddings (RoPE) instead of absolute position embeddings.
-
-✅ Benefits of RoPE:
-
-Improves long-range dependencies
-
-Works better in autoregressive tasks
-
-Provides continuous positional encoding
-
-How RoPE Works?
-
-Computes sine and cosine positional encodings
-
-Applies element-wise multiplications to query & key embeddings
-
-Encodes relative positional information instead of absolute positions
-```
-🔹 Multi-Head Latent Attention (MultiHeadLatentAttention)
-```
-This is a custom attention mechanism designed for efficiency.
-
-✅ How is it different from standard attention?
-
-Latent compression: Instead of processing full attention keys/values, we compress the input using compression_ratio.
-
-Decomposed projections:
-
-First, project into latent space
-
-Then, project back to original dimensions
-
-Uses RoPE embeddings to enhance positional information
-
-💡 Why is this useful?
-
-Reduces memory and computation costs
-
-Enables faster attention computation
-
-Helps in scaling large models efficiently
-```
-🔹 Mixture of Experts (MoE) (LlamaMLP)
-```
-Instead of using a single MLP, the model uses multiple expert layers (MoE).
-
-✅ How MoE Works?
-
-Router Network selects the best top_k_experts for each token
-
-The token is processed only by selected experts, saving compute
-
-Final output is a weighted sum of expert outputs
-
-💡 Why Use MoE?
-
-Each expert learns specialized features
-
-Improves model efficiency (not all experts are active per token)
-
-Helps in scaling to large datasets
-```
-🔹 Transformer Decoder Layers (DecoderLayer)
-```
-Each Transformer Decoder Block has:
-✅ Multi-Head Latent Attention (MLHA)
-✅ Feed-forward MLP (Mixture of Experts)
-✅ Layer Normalization (CustomRMSNorm)
-✅ Dropout layers to prevent overfitting
-```
-
-# Model Training
+# CustomLLM
 
 ## Overview
-This script trains a custom large language model (LLM) using PyTorch and the Hugging Face `transformers` library. It leverages mixed precision (for supported devices) and gradient accumulation for efficient training on limited hardware.
+**CustomLLM** is a transformer-based language model designed for natural language processing tasks. It features a multi-layer decoder architecture with specialized attention mechanisms, rotary embeddings, and a mixture-of-experts (MoE) feedforward network to enhance computational efficiency and model performance.
 
-## Key Components
+## Model Architecture
 
-### Configuration
-- **CHECKPOINT_DIR**: Directory to save model checkpoints.
-- **SEQ_LENGTH**: Sequence length for tokenization, set to 256 due to memory constraints.
-- **BATCH_SIZE**: Set to 4, adjustable based on available memory.
-- **GRAD_ACCUM_STEPS**: Effective batch size is `BATCH_SIZE * GRAD_ACCUM_STEPS`.
+### Embeddings
+- **Token Embeddings**: Maps 49,152 vocabulary tokens to a 1,024-dimensional space.
+- **Position Embeddings**: Provides 2,048 position encodings to capture sequence order.
+- **Dropout**: A dropout layer (p=0.1) applied to prevent overfitting.
 
-### Accelerator Setup
-Uses the `Accelerator` from the `accelerate` library to manage mixed precision and gradient accumulation. It handles device compatibility (CUDA, MPS, or CPU).
+### Decoder Layers
+The model consists of **30 decoder layers**, each containing:
 
-### Tokenizer
-- The model uses a custom tokenizer: `HuggingFaceTB/cosmo2-tokenizer`.
-- The tokenizer's special tokens are aligned with the model configuration.
+#### 1. Self-Attention Mechanism
+- **Multi-Head Latent Attention**: Enhances feature extraction with multiple projections:
+  - `kv_proj_d`: Maps 1,024-dimensional inputs to 256 dimensions for key and value processing.
+  - `q_proj_d`: Projects queries to 256 dimensions.
+  - `k_proj_u`: Upscales key representations to 512 dimensions.
+  - `v_proj_u`: Expands values to 1,024 dimensions.
+  - `q_proj_u`: Upscales queries to 512 dimensions.
+  - `rope_k`, `rope_q`: Rotary positional embeddings for improved positional encoding.
+  - `o_proj`: Outputs 1,024-dimensional features.
+  
+#### 2. Feedforward Network (Mixture of Experts)
+- **LlamaMLP**: Implements a hybrid feedforward network with both shared and routed experts.
+- **Shared Experts**: A single `DeepSeekExpertLayer` with:
+  - `gate_proj`: Projects inputs to 786 dimensions.
+  - `up_proj`: Expands features to 786 dimensions.
+  - `down_proj`: Reduces back to 1,024 dimensions.
+  - Activation Function: **SiLU (Sigmoid Linear Unit)**.
+- **Routed Experts**: 7 additional `DeepSeekExpertLayer` components.
+- **Router**: A linear layer that selects among the 7 experts.
+
+#### 3. Normalization and Dropout
+- **Input Normalization**: `CustomRMSNorm` ensures stable training.
+- **Post-Attention Normalization**: `CustomRMSNorm` applied after self-attention.
+- **Dropout Layers**: Applied to attention (`p=0.3`) and MLP layers (`p=0.3`).
+
+### Output Layer
+- **Language Model Head (`lm_head`)**: A linear layer mapping 1,024 hidden dimensions to 49,152 vocabulary tokens.
+
+## Model Size
+- **Total Parameters**: **765.16M**
 
 ### Model Initialization
 - **CustomLLM** model is initialized with the custom configuration.
@@ -141,13 +66,12 @@ The model is trained using the `Trainer` API from Hugging Face:
 
 ### Example Output
 ```
-Model parameters: 1075.06M
 CustomLLM(
   (token_embeddings): Embedding(49152, 1024)
   (position_embeddings): Embedding(2048, 1024)
   (dropout): Dropout(p=0.1, inplace=False)
   (decoder_layers): ModuleList(
-    (0-23): 24 x DecoderLayer(
+    (0-29): 30 x DecoderLayer(
       (self_attn): MultiHeadLatentAttention(
         (kv_proj_d): Linear(in_features=1024, out_features=256, bias=False)
         (q_proj_d): Linear(in_features=1024, out_features=256, bias=False)
@@ -162,17 +86,17 @@ CustomLLM(
       (mlp): LlamaMLP(
         (shared_experts): ModuleList(
           (0): DeepSeekExpertLayer(
-            (gate_proj): Linear(in_features=1024, out_features=1536, bias=False)
-            (up_proj): Linear(in_features=1024, out_features=1536, bias=False)
-            (down_proj): Linear(in_features=1536, out_features=1024, bias=False)
+            (gate_proj): Linear(in_features=1024, out_features=786, bias=False)
+            (up_proj): Linear(in_features=1024, out_features=786, bias=False)
+            (down_proj): Linear(in_features=786, out_features=1024, bias=False)
             (act_fn): SiLU()
           )
         )
         (routed_experts): ModuleList(
           (0-6): 7 x DeepSeekExpertLayer(
-            (gate_proj): Linear(in_features=1024, out_features=1536, bias=False)
-            (up_proj): Linear(in_features=1024, out_features=1536, bias=False)
-            (down_proj): Linear(in_features=1536, out_features=1024, bias=False)
+            (gate_proj): Linear(in_features=1024, out_features=786, bias=False)
+            (up_proj): Linear(in_features=1024, out_features=786, bias=False)
+            (down_proj): Linear(in_features=786, out_features=1024, bias=False)
             (act_fn): SiLU()
           )
         )
@@ -180,10 +104,13 @@ CustomLLM(
       )
       (input_norm): CustomRMSNorm()
       (post_attn_norm): CustomRMSNorm()
+      (attn_dropout): Dropout(p=0.3, inplace=False)
+      (mlp_dropout): Dropout(p=0.3, inplace=False)
     )
   )
   (lm_head): Linear(in_features=1024, out_features=49152, bias=True)
 )
+Model parameters: 765.16M
 ```
 ### Training Log 
 
