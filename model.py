@@ -240,8 +240,8 @@ class DecoderLayer(nn.Module):
         self.mlp = LlamaMLP(config.hidden_size, config.intermediate_size, config.num_experts, config.num_shared_experts, config.top_k_experts)
         self.input_norm = CustomRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attn_norm = CustomRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.attn_dropout = nn.Dropout(0.3)  # Added
-        self.mlp_dropout = nn.Dropout(0.3)   # Added
+        self.attn_dropout = nn.Dropout(0.15)  # Added
+        self.mlp_dropout = nn.Dropout(0.15)   # Added
         
 
     def forward(self, x, attention_mask=None, past_key_value=None, use_cache=False):

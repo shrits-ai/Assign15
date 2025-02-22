@@ -90,19 +90,20 @@ data_collator = DataCollatorForLanguageModeling(
 
 # Training arguments with stabilization
 training_args = TrainingArguments(
-    output_dir=CHECKPOINT_DIR,
+    output_dir="CHECKPOINT_DIR",
     per_device_train_batch_size=BATCH_SIZE,
     max_steps=10000,
     logging_steps=100,
-    save_steps=500,
+    save_steps=1000,
     evaluation_strategy="no",
-    learning_rate=3e-6,  # Adjusted learning rate
-    lr_scheduler_type="cosine",  # Changed to cosine decay
-    warmup_steps=1000,
-    weight_decay=0.15,
+    learning_rate=3e-6,  
+    lr_scheduler_type="cosine",  
+    warmup_ratio=0.2,  
+    weight_decay=0.02,  
     optim="adamw_torch_fused",
+    adam_beta2=0.998,  
     gradient_accumulation_steps=GRAD_ACCUM_STEPS,
-    max_grad_norm=1.0,  # Tighter gradient clipping
+    max_grad_norm=1.5,  
     fp16=False,
     remove_unused_columns=True,
     report_to="wandb",
@@ -136,7 +137,7 @@ trainer = Trainer(
 )
 
 # Checkpoint handling
-checkpoint_path = f"{CHECKPOINT_DIR}/checkpoint-5000"
+checkpoint_path = f"{CHECKPOINT_DIR}/checkpoint-8500"
 if os.path.exists(checkpoint_path):
     print(f"Resuming from {checkpoint_path}")
     trainer.train(resume_from_checkpoint=checkpoint_path)
